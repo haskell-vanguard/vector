@@ -86,11 +86,15 @@ import Foreign.Ptr ()
 import Foreign.Marshal.Array ( advancePtr, copyArray, moveArray )
 
 import Control.Monad.Primitive
+#if MIN_VERSION_primitive(0,7,0)
+import qualified Data.Primitive.Ptr as Prim
+#else
 import Data.Primitive.Addr
+#endif
 import Data.Primitive.Types (Prim)
 
 import GHC.Word (Word8, Word16, Word32, Word64)
-import GHC.Ptr (Ptr(..))
+import GHC.Ptr (Ptr(..), castPtr, plusPtr)
 
 import Prelude hiding ( length, null, replicate, reverse, map, read,
                         take, drop, splitAt, init, tail )
@@ -180,9 +184,14 @@ instance Storable a => G.MVector MVector a where
 
 storableZero :: forall a m. (Storable a, PrimMonad m) => MVector (PrimState m) a -> m ()
 {-# INLINE storableZero #-}
+#if MIN_VERSION_primitive(0,7,0)
+storableZero (MVector n fp) = unsafePrimToPrim . withForeignPtr fp $ \p -> do
+  Prim.setPtr (castPtr p) byteSize (0 :: Word8)
+#else
 storableZero (MVector n fp) = unsafePrimToPrim . withForeignPtr fp $ \(Ptr p) -> do
   let q = Addr p
   setAddr q byteSize (0 :: Word8)
+#endif
  where
  x :: a
  x = undefined
@@ -214,12 +223,18 @@ storableSet (MVector n fp) x
 storableSetAsPrim
   :: (Storable a, Prim b) => Int -> ForeignPtr a -> a -> b -> IO ()
 {-# INLINE [0] storableSetAsPrim #-}
+#if MIN_VERSION_primitive(0,7,0)
+storableSetAsPrim n fp x y = withForeignPtr fp $ \p -> do
+  poke p x
+  w <- Prim.readOffPtr (castPtr p) 0
+  Prim.setPtr (castPtr p `plusPtr` sizeOf x) (n-1) (w `asTypeOf` y)
+#else
 storableSetAsPrim n fp x y = withForeignPtr fp $ \(Ptr p) -> do
   poke (Ptr p) x
   let q = Addr p
   w <- readOffAddr q 0
   setAddr (q `plusAddr` sizeOf x) (n-1) (w `asTypeOf` y)
-
+#endif
 {-# INLINE mallocVector #-}
 mallocVector :: Storable a => Int -> IO (ForeignPtr a)
 mallocVector =
@@ -564,4 +579,3 @@ unsafeToForeignPtr0 (MVector n fp) = (fp, n)
 unsafeWith :: Storable a => IOVector a -> (Ptr a -> IO b) -> IO b
 {-# INLINE unsafeWith #-}
 unsafeWith (MVector _ fp) = withForeignPtr fp
-
